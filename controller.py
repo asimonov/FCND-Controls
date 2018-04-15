@@ -14,6 +14,8 @@ GRAVITY = -9.81
 MOI = np.array([0.005, 0.005, 0.01])
 MAX_THRUST = 10.0
 MAX_TORQUE = 1.0
+MAX_PITCH = 20.0
+MAX_ROLL = MAX_PITCH
 
 class NonlinearController(object):
 
@@ -33,7 +35,7 @@ class NonlinearController(object):
         print('roll=pitch: Kp={}'.format(self.roll_Kp))
         self.pitch_Kp = self.roll_Kp
 
-        yaw_t_rise = 1.0 # yaw controller needs to be more relaxed. probably because of inertia around z
+        yaw_t_rise = 1.0 # yaw controller needs to be more relaxed. probably because of bigger inertia around z
         yaw_delta = 0.9
         yaw_omega_n = 1.57 / yaw_t_rise
         self.yaw_Kp = yaw_omega_n ** 2
@@ -46,9 +48,12 @@ class NonlinearController(object):
         self.alt_Kd = 2 * alt_delta * alt_omega_n
         print('alt: Kp={} Kd={}'.format(self.alt_Kp, self.alt_Kd))
 
-
-        #self.lat_Kp
-        #self.lat_Kd
+        pos_t_rise = 1.0
+        pos_delta = 0.8
+        pos_omega_n = 1.57 / pos_t_rise
+        self.pos_Kp = pos_omega_n ** 2
+        self.pos_Kd = 2 * pos_delta * pos_omega_n
+        print('pos: Kp={} Kd={}'.format(self.pos_Kp, self.pos_Kd))
 
 
     def trajectory_control(self, position_trajectory, yaw_trajectory, time_trajectory, current_time):
@@ -142,8 +147,8 @@ class NonlinearController(object):
                              [R[1, 1], -R[0, 1]]]) / R[2, 2]
 
         rot_rate = np.matmul(rot_mat1, np.array([b_x_commanded_dot, b_y_commanded_dot]).T)
-        p_c = rot_rate[0]
-        q_c = rot_rate[1]
+        p_c = np.clip(rot_rate[0], -MAX_ROLL/180.0, MAX_ROLL/180.0)
+        q_c = np.clip(rot_rate[1], -MAX_PITCH/180.0, MAX_PITCH/180.0)
 
         return np.array([p_c, q_c])
 
@@ -175,7 +180,18 @@ class NonlinearController(object):
 
         return np.clip(u1_cmd, 0.0, MAX_THRUST)
 
+    def yaw_control(self, yaw_cmd, yaw):
+        """ Generate the target yawrate
 
+        Args:
+            yaw_cmd: desired vehicle yaw in radians
+            yaw: vehicle yaw in radians
+
+        Returns: target yawrate in radians/sec
+        """
+        err = yaw_cmd - yaw
+        yaw_r = self.yaw_Kp * err
+        return yaw_r
 
     def lateral_position_control(self, local_position_cmd, local_velocity_cmd, local_position, local_velocity,
                                acceleration_ff = np.array([0.0, 0.0])):
@@ -190,21 +206,13 @@ class NonlinearController(object):
             
         Returns: desired vehicle 2D acceleration in the local frame [north, east]
         """
-        return np.array([0.0, 0.0])
-    
+        err = local_position_cmd - local_position
+        err_vel = local_velocity_cmd - local_velocity
+        acc_cmd = self.pos_Kp * err + self.pos_Kd * err_vel + DRONE_MASS_KG*acceleration_ff
+
+        return acc_cmd
 
 
 
-    def yaw_control(self, yaw_cmd, yaw):
-        """ Generate the target yawrate
-        
-        Args:
-            yaw_cmd: desired vehicle yaw in radians
-            yaw: vehicle yaw in radians
-        
-        Returns: target yawrate in radians/sec
-        """
-        err = yaw_cmd - yaw
-        yaw_r = self.yaw_Kp * err
-        return yaw_r
-    
+
+

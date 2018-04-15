@@ -69,9 +69,10 @@ class ControlsFlyer(UnityDrone):
                 # PLAN PATH
                 print("plan trajectory")
                 #self.all_waypoints = self.calculate_box()
+                time_mult = 10.0
                 (self.position_trajectory,
                  self.time_trajectory,
-                 self.yaw_trajectory) = self.load_test_trajectory(time_mult=0.5)
+                 self.yaw_trajectory) = self.load_test_trajectory(time_mult)
                 self.all_waypoints = self.position_trajectory.copy()
                 self.waypoint_number = -1
                 # EXECUTE PATH: start
@@ -82,8 +83,8 @@ class ControlsFlyer(UnityDrone):
             if time.time() > self.time_trajectory[self.waypoint_number]:
                 if len(self.all_waypoints) > 0:
                     # EXECUTE PATH: continue
-                    #self.waypoint_transition()
-                    pass
+                    self.waypoint_transition()
+                    #pass
                 else:
                     if np.linalg.norm(self.local_velocity[0:2]) < 1.0:
                         # EXECUTE PATH: finish
@@ -122,15 +123,17 @@ class ControlsFlyer(UnityDrone):
 
             moment_cmd = self.controller.body_rate_control(self.body_rate_target, self.gyro_raw)
 
-            print("alt {:.4f}/{:.4f}; alt_vel {:.4f}/{:.4f}; thrust {:.4f}".format(
-                self.local_position[2], self.local_position_target[2],
-                self.local_velocity[2], self.local_velocity_target[2],
-                self.thrust_cmd))
-            print("roll {:.4f}/{:.4f}; pitch {:.4f}/{:.4f}; yaw {:.4f}/{:.4f}; moments {:.4f}, {:.4f}, {:.4f}".format(
+#            print("alt {:.4f}/{:.4f}; alt_vel {:.4f}/{:.4f}; thrust {:.4f}".format(
+#                self.local_position[2], self.local_position_target[2],
+#                self.local_velocity[2], self.local_velocity_target[2],
+#                self.thrust_cmd))
+            print("roll {:.4f}/{:.4f}; pitch {:.4f}/{:.4f}; yaw {:.4f}/{:.4f}; moments {:.4f}, {:.4f}, {:.4f}; thrust {:.4f}".format(
                 self.attitude[0], self.attitude_target[0],
                 self.attitude[1], self.attitude_target[1],
                 self.attitude[2], self.attitude_target[2],
-                moment_cmd[0], moment_cmd[1], moment_cmd[2])
+                moment_cmd[0], moment_cmd[1], moment_cmd[2],
+                self.thrust_cmd
+            )
             )
 
             self.cmd_moment(moment_cmd[0],
@@ -149,24 +152,29 @@ class ControlsFlyer(UnityDrone):
             #self.position_controller()
             self.velocity_cnt += 1
 
-#            (self.local_position_target,
-#             self.local_velocity_target,
-#             yaw_cmd) = self.controller.trajectory_control(
-#                             self.position_trajectory,
-#                             self.yaw_trajectory,
-#                             self.time_trajectory, time.time())
-            self.local_position_target = np.array([0.0, 0.0, -3.0])
-            self.local_velocity_target = np.array([0.0, 0.0, 0.0])
-            yaw_cmd = 0.0
+            (self.local_position_target,
+             self.local_velocity_target,
+             yaw_cmd) = self.controller.trajectory_control(
+                             self.position_trajectory,
+                             self.yaw_trajectory,
+                             self.time_trajectory, time.time())
+#            self.local_position_target = np.array([0.0, 0.0, -3.0])
+#            self.local_velocity_target = np.array([0.0, 0.0, 0.0])
+#            yaw_cmd = 0.0
 
             self.attitude_target = np.array((0.0, 0.0, yaw_cmd))
 
-            #acceleration_cmd = self.controller.lateral_position_control(
-            #    self.local_position_target[0:2],
-            #    self.local_velocity_target[0:2],
-            #    self.local_position[0:2],
-            #    self.local_velocity[0:2])
-            acceleration_cmd = np.array([0.0, 0.0])
+            acceleration_cmd = self.controller.lateral_position_control(
+                self.local_position_target[0:2],
+                self.local_velocity_target[0:2],
+                self.local_position[0:2],
+                self.local_velocity[0:2])
+            #acceleration_cmd = np.array([0.0, 0.0])
+            print("acc:{:.4f}/{:.4f} --- pos diff:{:.4f}/{:.4f} --- vel diff:{:.4f}/{:.4f}".format(
+                acceleration_cmd[0], acceleration_cmd[1],
+                self.local_position_target[0] - self.local_position[0], self.local_position_target[1] - self.local_position[1],
+                self.local_velocity_target[0] - self.local_velocity[0], self.local_velocity_target[1] - self.local_velocity[1]
+            ))
             self.local_acceleration_target = np.array([acceleration_cmd[0],
                                                        acceleration_cmd[1],
                                                        0.0])
@@ -198,9 +206,9 @@ class ControlsFlyer(UnityDrone):
         self.flight_state = States.TAKEOFF
 
     def waypoint_transition(self):
-        print("waypoint transition")
         self.waypoint_number = self.waypoint_number + 1
         self.target_position = self.all_waypoints.pop(0)
+        print("waypoint transition: {}, {}".format(self.target_position[0], self.target_position[1]))
         self.flight_state = States.WAYPOINT
 
 
