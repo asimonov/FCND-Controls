@@ -22,13 +22,13 @@ class NonlinearController(object):
     def __init__(self):
         """Initialize the controller object and control gains"""
 
-        body_t_rise = 0.4
+        body_t_rise = 0.35
         body_delta = 0.7
         body_omega_n = 1.57 / body_t_rise
         self.body_rate_Kp = body_omega_n ** 2
         print('body: Kp={}'.format(self.body_rate_Kp))
 
-        roll_t_rise = 0.6
+        roll_t_rise = 0.55
         roll_delta = 0.9
         roll_omega_n = 1.57 / roll_t_rise
         self.roll_Kp = roll_omega_n ** 2
@@ -48,8 +48,8 @@ class NonlinearController(object):
         self.alt_Kd = 2 * alt_delta * alt_omega_n
         print('alt: Kp={} Kd={}'.format(self.alt_Kp, self.alt_Kd))
 
-        pos_t_rise = 1.0
-        pos_delta = 0.8
+        pos_t_rise = 0.85
+        pos_delta = 0.9
         pos_omega_n = 1.57 / pos_t_rise
         self.pos_Kp = pos_omega_n ** 2
         self.pos_Kd = 2 * pos_delta * pos_omega_n
@@ -116,41 +116,76 @@ class NonlinearController(object):
         u_bar = self.body_rate_Kp * err * MOI
         return np.clip(u_bar, -MAX_TORQUE, MAX_TORQUE)
 
-    def roll_pitch_controller(self, acceleration_cmd, attitude, thrust_cmd):
+
+
+    # def roll_pitch_controller(self, acceleration_cmd, attitude, thrust_cmd):
+    #     """ Generate the rollrate and pitchrate commands in the body frame
+    #
+    #     Args:
+    #         target_acceleration: 2-element numpy array (north_acceleration_cmd,east_acceleration_cmd) in m/s^2
+    #         attitude: 3-element numpy array (roll, pitch, yaw) in radians
+    #         thrust_cmd: vehicle thruts command in Newton
+    #
+    #     Returns: 2-element numpy array, desired rollrate (p) and pitchrate (q) commands in radians/s
+    #     """
+    #     if thrust_cmd < 1e-5:
+    #         return np.array([0.0, 0.0])
+    #     R = euler2RM(attitude[0], attitude[1], attitude[2])
+    #
+    #     b_x_c = acceleration_cmd[0] / thrust_cmd # desired
+    #     b_x = R[0, 2]
+    #     b_x_err = b_x_c - b_x
+    #     b_x_p_term = self.roll_Kp * b_x_err
+    #
+    #     b_y_c = acceleration_cmd[1] / thrust_cmd # desired
+    #     b_y = R[1, 2]
+    #     b_y_err = b_y_c - b_y
+    #     b_y_p_term = self.pitch_Kp * b_y_err
+    #
+    #     b_x_commanded_dot = b_x_p_term
+    #     b_y_commanded_dot = b_y_p_term
+    #
+    #     rot_mat1 = np.array([[R[1, 0], -R[0, 0]],
+    #                          [R[1, 1], -R[0, 1]]]) / R[2, 2]
+    #
+    #     rot_rate = np.matmul(rot_mat1, np.array([b_x_commanded_dot, b_y_commanded_dot]).T)
+    #     p_c = np.clip(rot_rate[0], -MAX_ROLL/180.0, MAX_ROLL/180.0)
+    #     q_c = np.clip(rot_rate[1], -MAX_PITCH/180.0, MAX_PITCH/180.0)
+    #
+    #     return np.array([p_c, q_c])
+
+    def roll_pitch_controller(self,
+                              acceleration_cmd,
+                              attitude,
+                              thrust_cmd):
         """ Generate the rollrate and pitchrate commands in the body frame
 
         Args:
             target_acceleration: 2-element numpy array (north_acceleration_cmd,east_acceleration_cmd) in m/s^2
-            attitude: 3-element numpy array (roll, pitch, yaw) in radians
+            attitude: 3-element numpy array (roll,pitch,yaw) in radians
             thrust_cmd: vehicle thruts command in Newton
 
         Returns: 2-element numpy array, desired rollrate (p) and pitchrate (q) commands in radians/s
         """
-        if thrust_cmd < 1e-5:
-            return np.array([0.0, 0.0])
+        # Calculate rotation matrix
         R = euler2RM(attitude[0], attitude[1], attitude[2])
+        c_d = thrust_cmd / DRONE_MASS_KG
 
-        b_x_c = acceleration_cmd[0] / thrust_cmd # desired
-        b_x = R[0, 2]
-        b_x_err = b_x_c - b_x
-        b_x_p_term = self.roll_Kp * b_x_err
+        if thrust_cmd > 0.0:
+            target_R13 = -min(max(acceleration_cmd[0].item() / c_d, -1.0), 1.0)
+            target_R23 = -min(max(acceleration_cmd[1].item() / c_d, -1.0), 1.0)
 
-        b_y_c = acceleration_cmd[1] / thrust_cmd # desired
-        b_y = R[1, 2]
-        b_y_err = b_y_c - b_y
-        b_y_p_term = self.pitch_Kp * b_y_err
+            p_cmd = (1 / R[2, 2]) * \
+                    (-R[1, 0] * self.roll_Kp * (R[0, 2] - target_R13) + \
+                     R[0, 0] * self.pitch_Kp * (R[1, 2] - target_R23))
+            q_cmd = (1 / R[2, 2]) * \
+                    (-R[1, 1] * self.pitch_Kp * (R[0, 2] - target_R13) + \
+                     R[0, 1] * self.pitch_Kp * (R[1, 2] - target_R23))
+        else:  # Otherwise command no rate
+            p_cmd = 0.0
+            q_cmd = 0.0
+        return np.array([p_cmd, q_cmd])
 
-        b_x_commanded_dot = b_x_p_term
-        b_y_commanded_dot = b_y_p_term
-
-        rot_mat1 = np.array([[R[1, 0], -R[0, 0]],
-                             [R[1, 1], -R[0, 1]]]) / R[2, 2]
-
-        rot_rate = np.matmul(rot_mat1, np.array([b_x_commanded_dot, b_y_commanded_dot]).T)
-        p_c = np.clip(rot_rate[0], -MAX_ROLL/180.0, MAX_ROLL/180.0)
-        q_c = np.clip(rot_rate[1], -MAX_PITCH/180.0, MAX_PITCH/180.0)
-
-        return np.array([p_c, q_c])
 
     def altitude_control(self,
                          altitude_cmd,
